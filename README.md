@@ -1,6 +1,8 @@
-# Go Concept Trainer
+# Clanker Rehab
 
-A local web application for learning and practicing Go language concepts through spaced repetition.
+🦝 **Thinking is BACK**
+
+An interactive learning platform to master Go fundamentals without AI assistance. Features 104 structured concepts, spaced repetition, and a brushtail possum.
 
 ## Features
 
