@@ -19,7 +19,7 @@ An interactive learning platform to master Go fundamentals without AI assistance
 ## Quick Start
 
 ```bash
-cd go-concept-trainer
+cd Clanker-Rehab
 go run main.go
 ```
 
