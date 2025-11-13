@@ -403,13 +403,8 @@ header h1 {
     position: relative;
 }
 
-.learned-card:hover .lightbulb-indicator::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    margin-bottom: 5px;
+.assistance-tooltip {
+    position: fixed;
     padding: 6px 10px;
     background: #2d2d30;
     color: #dcdcaa;
@@ -417,20 +412,9 @@ header h1 {
     border-radius: 4px;
     white-space: nowrap;
     font-size: 0.75rem;
-    z-index: 1000;
+    z-index: 10000;
     pointer-events: none;
-}
-
-.learned-card:hover .lightbulb-indicator::before {
-    content: '';
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 5px solid transparent;
-    border-top-color: #4ec9b0;
-    z-index: 1000;
-    pointer-events: none;
+    display: none;
 }
 
 .learned-name {

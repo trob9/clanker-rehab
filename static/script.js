@@ -60,6 +60,9 @@ const CATEGORY_ORDER = [
     'Miscellaneous'
 ];
 
+// Tooltip element for assisted concepts
+let assistanceTooltip = null;
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     // Initialize rotating quote
@@ -69,6 +72,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         quoteEl.style.opacity = '1';
         setInterval(rotateQuote, 10000); // Rotate every 10 seconds
     }
+
+    // Create tooltip element
+    assistanceTooltip = document.createElement('div');
+    assistanceTooltip.className = 'assistance-tooltip';
+    assistanceTooltip.textContent = 'you needed help to solve this, so it expires sooner';
+    document.body.appendChild(assistanceTooltip);
 
     loadSettings();
     loadLearnedConcepts();
@@ -401,9 +410,28 @@ function renderLearned() {
             const lightbulbBtn = document.createElement('span');
             lightbulbBtn.className = 'lightbulb-indicator';
             lightbulbBtn.innerHTML = '💡';
-            lightbulbBtn.setAttribute('data-tooltip', 'you needed help to solve this, so it expires sooner');
             lightbulbBtn.style.cssText = 'cursor: default; font-size: 1rem; margin-right: 0.25rem; flex-shrink: 0; display: inline-block;';
             card.appendChild(lightbulbBtn);
+
+            // Add mouse event listeners for tooltip
+            card.addEventListener('mouseenter', () => {
+                if (assistanceTooltip) {
+                    assistanceTooltip.style.display = 'block';
+                }
+            });
+
+            card.addEventListener('mousemove', (e) => {
+                if (assistanceTooltip) {
+                    assistanceTooltip.style.left = (e.clientX + 10) + 'px';
+                    assistanceTooltip.style.top = (e.clientY + 10) + 'px';
+                }
+            });
+
+            card.addEventListener('mouseleave', () => {
+                if (assistanceTooltip) {
+                    assistanceTooltip.style.display = 'none';
+                }
+            });
         }
 
         card.appendChild(trashBtn);
