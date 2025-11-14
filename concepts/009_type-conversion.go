@@ -20,7 +20,8 @@ func main() {
 import "fmt"
 
 func main() {
-	x := int(3.7)
+	f := 3.7
+	x := int(f)
 	fmt.Println(x)
 }`,
 	ExpectedOutput: "3",
