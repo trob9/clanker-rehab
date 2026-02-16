@@ -25,6 +25,10 @@ go.work
 # OS
 .DS_Store
 
+# WASM build artifacts (built during Docker build)
+*.wasm
+static/wasm_exec.js
+
 # Claude Code files
 PROJECT_INDEX.json
 PROJECT_INDEX.json.tmp

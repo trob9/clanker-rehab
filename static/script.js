@@ -63,6 +63,77 @@ const CATEGORY_ORDER = [
 // Tooltip element for assisted concepts
 let assistanceTooltip = null;
 
+// WASM Worker state
+let wasmWorker = null;
+let wasmReady = false;
+const WASM_TIMEOUT_MS = 5000;
+
+function createWorker() {
+    if (wasmWorker) {
+        wasmWorker.terminate();
+    }
+    wasmReady = false;
+    wasmWorker = new Worker('/static/worker.js');
+    wasmWorker.onmessage = function (e) {
+        if (e.data.type === 'ready') {
+            wasmReady = true;
+            updateWasmStatus();
+        }
+    };
+    wasmWorker.onerror = function (err) {
+        console.error('Worker error:', err);
+    };
+    updateWasmStatus();
+}
+
+function updateWasmStatus() {
+    const runBtn = document.getElementById('run-btn');
+    const indicator = document.getElementById('wasm-status');
+    if (wasmReady) {
+        if (runBtn) runBtn.disabled = false;
+        if (runBtn) runBtn.textContent = '\u25b6 Run Code';
+        if (indicator) indicator.textContent = 'WASM Ready';
+        if (indicator) indicator.style.background = '#2d4a2d';
+    } else {
+        if (runBtn) runBtn.disabled = true;
+        if (runBtn) runBtn.textContent = 'Loading WASM...';
+        if (indicator) indicator.textContent = 'Loading WASM...';
+        if (indicator) indicator.style.background = '#4a3a2d';
+    }
+}
+
+function executeInWorker(code) {
+    return new Promise((resolve, reject) => {
+        if (!wasmReady) {
+            reject(new Error('WASM interpreter not ready'));
+            return;
+        }
+
+        let timer = null;
+
+        function onMessage(e) {
+            if (e.data.type === 'result') {
+                clearTimeout(timer);
+                wasmWorker.removeEventListener('message', onMessage);
+                resolve({ output: e.data.output || '', error: e.data.error || '' });
+            }
+        }
+
+        wasmWorker.addEventListener('message', onMessage);
+
+        timer = setTimeout(() => {
+            wasmWorker.removeEventListener('message', onMessage);
+            // Kill the stuck worker and recreate
+            wasmWorker.terminate();
+            wasmReady = false;
+            resolve({ output: '', error: 'Execution timed out (5s limit)' });
+            createWorker();
+        }, WASM_TIMEOUT_MS);
+
+        wasmWorker.postMessage({ type: 'run', code: code });
+    });
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     // Initialize rotating quote
@@ -86,6 +157,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderConcepts();
     startExpiryCheck();
     setupEventListeners();
+
+    // Start WASM worker
+    createWorker();
 
     // Show possum credit on initial load
     document.getElementById('possum-credit').style.display = 'block';
@@ -631,36 +705,52 @@ async function runCode() {
         return;
     }
 
+    if (!wasmReady) {
+        alert('WASM interpreter is still loading. Please wait.');
+        return;
+    }
+
     const code = editor.getValue();
     const outputEl = document.getElementById('output-content');
+    const runBtn = document.getElementById('run-btn');
     outputEl.textContent = 'Running...';
     outputEl.className = '';
+    runBtn.disabled = true;
+    runBtn.textContent = 'Running...';
 
     try {
-        const response = await fetch('/api/run', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                code: code,
-                conceptId: currentConcept.id
-            })
-        });
+        const result = await executeInWorker(code);
 
-        const result = await response.json();
+        const outputStr = (result.output || '').trim();
+        const expected = (currentConcept.expectedOutput || '').trim();
+        const success = !result.error && outputStr === expected;
 
-        if (result.success) {
-            outputEl.textContent = `✓ Success!\n\nOutput:\n${result.output}`;
+        if (success) {
+            outputEl.textContent = `\u2713 Success!\n\nOutput:\n${outputStr}`;
             outputEl.className = 'success';
             saveSolution(currentConcept.id, code);
-            clearDraft(currentConcept.id); // Clear draft on success
+            clearDraft(currentConcept.id);
             markAsLearned(currentConcept.id);
         } else {
-            outputEl.textContent = `✗ Failed\n\n${result.error}\n\nOutput:\n${result.output}`;
+            let msg = '\u2717 Failed\n\n';
+            if (result.error) {
+                msg += `Error: ${result.error}\n\n`;
+            }
+            if (outputStr && outputStr !== expected) {
+                msg += `Expected: ${JSON.stringify(expected)}\nGot: ${JSON.stringify(outputStr)}\n\n`;
+            }
+            if (outputStr) {
+                msg += `Output:\n${outputStr}`;
+            }
+            outputEl.textContent = msg;
             outputEl.className = 'error';
         }
     } catch (err) {
         outputEl.textContent = `Error: ${err.message}`;
         outputEl.className = 'error';
+    } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = '\u25b6 Run Code';
     }
 }
 
