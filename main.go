@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"html/template"
 	"log"
 	"net/http"
@@ -138,6 +140,30 @@ func serveRun(w http.ResponseWriter, r *http.Request) {
 	if concept == nil {
 		http.Error(w, "Concept not found", http.StatusNotFound)
 		return
+	}
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "main.go", req.Code, parser.ImportsOnly)
+	if err != nil {
+		sendError(w, "Compilation Error", fmt.Errorf("failed to parse code: %v", err))
+		return
+	}
+
+	forbidden := map[string]bool{
+		"os/exec":   true,
+		"net":       true,
+		"net/http":  true,
+		"syscall":   true,
+		"unsafe":    true,
+		"os/signal": true,
+	}
+
+	for _, s := range f.Imports {
+		path := strings.Trim(s.Path.Value, "\"")
+		if forbidden[path] {
+			sendError(w, "Security Violation", fmt.Errorf("package '%s' is not allowed", path))
+			return
+		}
 	}
 
 	tmpDir, err := os.MkdirTemp("", "gorun-*")
