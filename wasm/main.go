@@ -11,6 +11,45 @@ import (
 	"github.com/traefik/yaegi/stdlib"
 )
 
+// safePackages is an explicit whitelist of stdlib packages user code may import.
+// Dangerous packages (os, net, syscall, unsafe, os/exec, plugin, runtime) are
+// intentionally excluded as defence-in-depth on top of the WASM sandbox.
+var safePackages = map[string]bool{
+	"bufio":         true,
+	"bytes":         true,
+	"context":       true,
+	"crypto/sha256": true,
+	"encoding/json": true,
+	"errors":        true,
+	"fmt":           true,
+	"io":            true,
+	"log":           true,
+	"math":          true,
+	"math/bits":     true,
+	"math/rand":     true,
+	"reflect":       true,
+	"regexp":        true,
+	"sort":          true,
+	"strconv":       true,
+	"strings":       true,
+	"sync":          true,
+	"sync/atomic":   true,
+	"time":          true,
+	"unicode":       true,
+	"unicode/utf8":  true,
+}
+
+// safeSymbols returns a filtered interp.Exports containing only whitelisted packages.
+func safeSymbols() interp.Exports {
+	filtered := make(interp.Exports)
+	for pkg, symbols := range stdlib.Symbols {
+		if safePackages[pkg] {
+			filtered[pkg] = symbols
+		}
+	}
+	return filtered
+}
+
 type result struct {
 	Output string `json:"output"`
 	Error  string `json:"error"`
@@ -33,7 +72,7 @@ func runGoCode(this js.Value, args []js.Value) interface{} {
 		Stderr: &stderr,
 	})
 
-	if err := i.Use(stdlib.Symbols); err != nil {
+	if err := i.Use(safeSymbols()); err != nil {
 		return marshal(result{Error: "failed to load stdlib: " + err.Error()})
 	}
 
