@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -139,9 +140,12 @@ func securityHeaders(next http.Handler) http.Handler {
 
 func rateLimitMiddleware(limiter *ipLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
+		// Use X-Forwarded-For to get the real client IP behind Caddy.
+		ip := r.Header.Get("X-Forwarded-For")
+		if ip == "" {
+			ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+		} else if idx := strings.Index(ip, ","); idx != -1 {
+			ip = strings.TrimSpace(ip[:idx])
 		}
 		if !limiter.allow(ip) {
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
