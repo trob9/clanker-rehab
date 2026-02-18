@@ -57,7 +57,9 @@ type result struct {
 
 func main() {
 	js.Global().Set("runGoCode", js.FuncOf(runGoCode))
-	js.Global().Call("eval", "if(typeof onWasmReady==='function'){onWasmReady()}")
+	if cb := js.Global().Get("onWasmReady"); cb.Type() == js.TypeFunction {
+		cb.Invoke()
+	}
 	<-make(chan struct{})
 }
 

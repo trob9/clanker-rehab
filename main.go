@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
+	"sync"
+	"time"
 
 	"go-concept-trainer/concepts"
 )
@@ -73,20 +76,88 @@ func convertTestCases(tcs []concepts.TestCase) []TestCase {
 	return result
 }
 
+// ipLimiter is a simple fixed-window per-IP rate limiter.
+type ipLimiter struct {
+	mu      sync.Mutex
+	windows map[string]*ipWindow
+}
+
+type ipWindow struct {
+	count int
+	reset time.Time
+}
+
+const (
+	rateLimit  = 120           // requests per window
+	rateWindow = time.Minute   // window duration
+	maxBodyLen = 1 << 20       // 1 MB
+)
+
+func newIPLimiter() *ipLimiter {
+	l := &ipLimiter{windows: make(map[string]*ipWindow)}
+	go func() {
+		for range time.Tick(5 * time.Minute) {
+			l.mu.Lock()
+			now := time.Now()
+			for ip, w := range l.windows {
+				if now.After(w.reset) {
+					delete(l.windows, ip)
+				}
+			}
+			l.mu.Unlock()
+		}
+	}()
+	return l
+}
+
+func (l *ipLimiter) allow(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	w, ok := l.windows[ip]
+	if !ok || now.After(w.reset) {
+		l.windows[ip] = &ipWindow{count: 1, reset: now.Add(rateWindow)}
+		return true
+	}
+	if w.count >= rateLimit {
+		return false
+	}
+	w.count++
+	return true
+}
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self'")
+			"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self'; base-uri 'self'; form-action 'self'")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func rateLimitMiddleware(limiter *ipLimiter, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			ip = r.RemoteAddr
+		}
+		if !limiter.allow(ip) {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
 
 func requestLimiter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
+		if r.ContentLength > maxBodyLen {
+			http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyLen)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -95,10 +166,31 @@ func main() {
 	allConcepts := getConcepts()
 	fmt.Printf("Loaded %d concepts from concepts package\n", len(allConcepts))
 
+	conceptsJSON, err := json.Marshal(allConcepts)
+	if err != nil {
+		log.Fatalf("Failed to marshal concepts: %v", err)
+	}
+
+	indexTmpl, err := template.ParseFiles("templates/index.html")
+	if err != nil {
+		log.Fatalf("Failed to parse template: %v", err)
+	}
+
+	limiter := newIPLimiter()
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", serveIndex)
-	mux.HandleFunc("/api/concepts", serveConcepts)
-	mux.Handle("/static/", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+	// Go 1.22+ method+path routing: non-matching methods get 405 automatically.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		if err := indexTmpl.Execute(w, nil); err != nil {
+			log.Printf("Template execute error: %v", err)
+		}
+	})
+	mux.HandleFunc("GET /api/concepts", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(conceptsJSON)
+	})
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "" || r.URL.Path[len(r.URL.Path)-1] == '/' {
 			http.NotFound(w, r)
 			return
@@ -106,29 +198,8 @@ func main() {
 		http.FileServer(http.Dir("static")).ServeHTTP(w, r)
 	})))
 
-	handler := securityHeaders(requestLimiter(mux))
+	handler := securityHeaders(rateLimitMiddleware(limiter, requestLimiter(mux)))
 
 	fmt.Println("Server running at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", handler))
-}
-
-func serveIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	tmpl, err := template.ParseFiles("templates/index.html")
-	if err != nil {
-		log.Printf("Template parse error: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	if err := tmpl.Execute(w, nil); err != nil {
-		log.Printf("Template execute error: %v", err)
-	}
-}
-
-func serveConcepts(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(getConcepts())
 }
