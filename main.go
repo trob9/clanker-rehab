@@ -194,6 +194,28 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(conceptsJSON)
 	})
+	mux.HandleFunc("POST /api/log-run", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ExitCode    int `json:"exit_code"`
+			DurationMs  int `json:"duration_ms"`
+			OutputBytes int `json:"output_bytes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		entry := map[string]interface{}{
+			"ts":           time.Now().UTC().Format(time.RFC3339),
+			"event":        "code_execute",
+			"lang":         "go",
+			"exit_code":    body.ExitCode,
+			"duration_ms":  body.DurationMs,
+			"output_bytes": body.OutputBytes,
+		}
+		b, _ := json.Marshal(entry)
+		fmt.Println(string(b))
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "" || r.URL.Path[len(r.URL.Path)-1] == '/' {
 			http.NotFound(w, r)
@@ -202,7 +224,7 @@ func main() {
 		http.FileServer(http.Dir("static")).ServeHTTP(w, r)
 	})))
 
-	handler := securityHeaders(rateLimitMiddleware(limiter, requestLimiter(mux)))
+	handler := accessLog(securityHeaders(rateLimitMiddleware(limiter, requestLimiter(mux))))
 
 	fmt.Println("Server running at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", handler))

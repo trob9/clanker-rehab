@@ -718,8 +718,20 @@ async function runCode() {
     runBtn.disabled = true;
     runBtn.textContent = 'Running...';
 
+    const runStart = Date.now();
     try {
         const result = await executeInWorker(code);
+        const runDurationMs = Date.now() - runStart;
+
+        fetch('/api/log-run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                exit_code: result.error ? 1 : 0,
+                duration_ms: runDurationMs,
+                output_bytes: (result.output || '').length + (result.error || '').length
+            })
+        }).catch(() => {});
 
         const outputStr = (result.output || '').trim();
         const expected = (currentConcept.expectedOutput || '').trim();

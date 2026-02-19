@@ -12,7 +12,7 @@ FROM golang:1.25-alpine AS server-builder
 WORKDIR /app
 COPY go.mod ./
 RUN go mod download || true
-COPY main.go ./
+COPY *.go ./
 COPY concepts/ ./concepts/
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o server .
 
